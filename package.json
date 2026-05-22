@@ -30,6 +30,7 @@
     "typescript": "^5.3.0"
   },
   "dependencies": {
+    "hwp.js": "^0.0.3",
     "jszip": "^3.10.1",
     "mammoth": "^1.7.0",
     "pdfjs-dist": "^5.7.284",

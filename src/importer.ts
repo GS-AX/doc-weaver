@@ -5,6 +5,7 @@ import { convertPlain } from './converters/plainConverter';
 import { convertPdf } from './converters/pdfConverter';
 import { convertPptx } from './converters/pptxConverter';
 import { convertXlsx } from './converters/xlsxConverter';
+import { convertHwp, convertHwpx } from './converters/hwpConverter';
 import { tFormat, formatStats } from './i18n';
 
 export class Importer {
@@ -119,6 +120,15 @@ export class Importer {
 					outputMode: this.settings.pptxOutput,
 					useWikilinks: this.settings.useWikilinks,
 				});
+			case 'hwp':
+			case 'hwpx': {
+				if (!this.settings.showHwpBeta) {
+					throw new Error('Enable "Show HWP beta features" in settings to import HWP/HWPx files.');
+				}
+				return ext === 'hwp'
+					? convertHwp(buffer)
+					: convertHwpx(buffer, this.settings.useWikilinks);
+			}
 			case 'xlsx':
 			case 'xls':
 				return convertXlsx(buffer, { outputMode: 'single' });
