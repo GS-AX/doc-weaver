@@ -1,0 +1,10 @@
+{
+  "id": "doc-weaver",
+  "name": "Doc Weaver",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Convert local documents (Word, PDF, PowerPoint, HWP) to Markdown and save into your Obsidian vault.",
+  "author": "GS-AX",
+  "authorUrl": "https://github.com/GS-AX",
+  "isDesktopOnly": true
+}
