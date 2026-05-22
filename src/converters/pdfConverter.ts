@@ -139,13 +139,14 @@ function linesToMarkdown(lines: Line[]): string {
 function buildScannedStub(warnings: ConversionWarning[]): ConverterOutput {
 	warnings.push({ message: 'PDF has no text layer (scanned image). Text extraction was not possible.' });
 
-	const markdown = '> ⚠️ This PDF has no text layer (scanned image). Text extraction was not possible.';
+	const markdown = '> ⚠️ This PDF has no text layer (scanned image). Text extraction was not possible.\n> Original file is referenced in the frontmatter above.';
 
 	return {
 		markdown,
 		warnings,
 		stats: { headings: 0, images: 0, tables: 0 },
 		assets: [],
+		frontmatterExtra: { pdf_has_text_layer: false },
 	};
 }
 

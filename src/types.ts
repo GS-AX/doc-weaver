@@ -60,6 +60,8 @@ export interface ConverterOutput {
 	assets: AssetData[];
 	/** Extra notes to write alongside the primary note (per-slide PPTX mode) */
 	additionalFiles?: AdditionalFile[];
+	/** Extra fields merged into YAML frontmatter (e.g. pdf_has_text_layer) */
+	frontmatterExtra?: Record<string, string | boolean | number>;
 }
 
 export interface ImportResult {

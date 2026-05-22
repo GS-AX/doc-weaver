@@ -69,8 +69,12 @@ export class Importer {
 				return { success: true, sourcePath: sourceName, warnings: output.warnings, skipped: true };
 			}
 
-			const frontmatter = this.buildFrontmatter(file.name, ext);
-			const content = frontmatter + output.markdown;
+			const frontmatter = this.buildFrontmatter(file.name, ext, output.frontmatterExtra);
+			// Resolve bare asset filenames to vault-relative paths (non-wikilink mode)
+			const markdown = output.assets.length > 0
+				? this.resolveAssetLinks(output.markdown, basename)
+				: output.markdown;
+			const content = frontmatter + markdown;
 
 			await this.ensureFolder(this.settings.destinationFolder);
 			await this.writeNote(destPath, content);
@@ -162,9 +166,43 @@ export class Importer {
 		}
 	}
 
-	private buildFrontmatter(filename: string, format: string): string {
-		const now = new Date().toISOString();
-		return `---\nsource_file: "${filename}"\nsource_format: "${format}"\nimported_at: "${now}"\n---\n\n`;
+	private buildFrontmatter(
+		filename: string,
+		format: string,
+		extra?: Record<string, string | boolean | number>,
+	): string {
+		const now = this.localISOString();
+		const lines = [
+			'---',
+			`source_file: "${filename}"`,
+			`source_format: "${format}"`,
+			`imported_at: "${now}"`,
+		];
+		if (extra) {
+			for (const [k, v] of Object.entries(extra)) {
+				lines.push(`${k}: ${JSON.stringify(v)}`);
+			}
+		}
+		lines.push('---', '');
+		return lines.join('\n') + '\n';
+	}
+
+	private localISOString(): string {
+		const now = new Date();
+		const offset = -now.getTimezoneOffset();
+		const sign = offset >= 0 ? '+' : '-';
+		const hh = String(Math.floor(Math.abs(offset) / 60)).padStart(2, '0');
+		const mm = String(Math.abs(offset) % 60).padStart(2, '0');
+		return now.toISOString().replace('Z', `${sign}${hh}:${mm}`);
+	}
+
+	private resolveAssetLinks(markdown: string, noteName: string): string {
+		if (this.settings.useWikilinks) return markdown;
+		const assetBase = `${this.settings.destinationFolder}/${this.settings.assetSubfolder}/${noteName}`;
+		// Replace bare filenames (no path separators) in markdown image links
+		return markdown.replace(/!\[([^\]]*)\]\(([^/)(]+\.[a-zA-Z]{2,5})\)/g, (_, alt, filename) => {
+			return `![${alt}](${assetBase}/${filename})`;
+		});
 	}
 
 	private async ensureFolder(folderPath: string): Promise<void> {
