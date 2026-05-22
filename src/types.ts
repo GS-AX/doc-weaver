@@ -47,11 +47,19 @@ export interface AssetData {
 	mimeType: string;
 }
 
+export interface AdditionalFile {
+	/** Note basename without .md extension */
+	basename: string;
+	content: string;
+}
+
 export interface ConverterOutput {
 	markdown: string;
 	warnings: ConversionWarning[];
 	stats: ConversionStats;
 	assets: AssetData[];
+	/** Extra notes to write alongside the primary note (per-slide PPTX mode) */
+	additionalFiles?: AdditionalFile[];
 }
 
 export interface ImportResult {

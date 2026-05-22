@@ -3,6 +3,7 @@ import { DocWeaverSettings, ImportResult, ConverterOutput, SUPPORTED_EXTENSIONS,
 import { convertDocx } from './converters/docxConverter';
 import { convertPlain } from './converters/plainConverter';
 import { convertPdf } from './converters/pdfConverter';
+import { convertPptx } from './converters/pptxConverter';
 import { convertXlsx } from './converters/xlsxConverter';
 import { tFormat, formatStats } from './i18n';
 
@@ -77,6 +78,16 @@ export class Importer {
 				await this.saveAssets(basename, output.assets);
 			}
 
+			if (output.additionalFiles && output.additionalFiles.length > 0) {
+				await this.ensureFolder(this.settings.destinationFolder);
+				for (const extra of output.additionalFiles) {
+					const extraPath = await this.resolveDestPath(extra.basename);
+					if (extraPath !== null) {
+						await this.writeNote(extraPath, extra.content);
+					}
+				}
+			}
+
 			if (this.settings.openAfterImport) {
 				const tfile = this.app.vault.getAbstractFileByPath(destPath);
 				if (tfile instanceof TFile) {
@@ -103,6 +114,11 @@ export class Importer {
 				return convertDocx(buffer, this.settings.useWikilinks);
 			case 'pdf':
 				return convertPdf(buffer);
+			case 'pptx':
+				return convertPptx(buffer, {
+					outputMode: this.settings.pptxOutput,
+					useWikilinks: this.settings.useWikilinks,
+				});
 			case 'xlsx':
 			case 'xls':
 				return convertXlsx(buffer, { outputMode: 'single' });
