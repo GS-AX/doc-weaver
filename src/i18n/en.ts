@@ -54,7 +54,7 @@ export const en = {
 	LANG_AUTO: 'Auto (follow system)',
 
 	// File picker
-	FILE_PICKER_LABEL: 'Documents',
+	FILE_PICKER_LABEL: 'Documents (Word, PDF, PowerPoint, Excel, HWP, Text)',
 
 	// Notices — use {placeholder} for dynamic values
 	NOTICE_SUCCESS: '✅ {name} → {dest} ({stats})',

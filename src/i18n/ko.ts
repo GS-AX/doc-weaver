@@ -50,7 +50,7 @@ export const ko: Translations = {
 	LANGUAGE_DESC: '플러그인 UI 언어',
 	LANG_AUTO: '자동 (시스템 언어 따름)',
 
-	FILE_PICKER_LABEL: '문서',
+	FILE_PICKER_LABEL: '문서 (Word, PDF, PowerPoint, Excel, HWP, 텍스트)',
 
 	NOTICE_SUCCESS: '✅ {name} → {dest} ({stats})',
 	NOTICE_SKIP: '⏭️ {name} — 이미 존재하여 건너뜀',

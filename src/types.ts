@@ -64,6 +64,6 @@ export interface ImportResult {
 	skipped?: boolean;
 }
 
-export type SupportedExtension = 'docx' | 'pptx' | 'pdf' | 'hwp' | 'hwpx' | 'txt' | 'csv';
+export type SupportedExtension = 'docx' | 'pptx' | 'pdf' | 'hwp' | 'hwpx' | 'txt' | 'csv' | 'xlsx' | 'xls';
 
-export const SUPPORTED_EXTENSIONS: SupportedExtension[] = ['docx', 'pptx', 'pdf', 'hwp', 'hwpx', 'txt', 'csv'];
+export const SUPPORTED_EXTENSIONS: SupportedExtension[] = ['docx', 'pptx', 'pdf', 'hwp', 'hwpx', 'txt', 'csv', 'xlsx', 'xls'];

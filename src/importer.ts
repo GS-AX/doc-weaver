@@ -2,7 +2,9 @@ import { App, Notice, TFile, normalizePath } from 'obsidian';
 import { DocWeaverSettings, ImportResult, ConverterOutput, SUPPORTED_EXTENSIONS, SupportedExtension } from './types';
 import { convertDocx } from './converters/docxConverter';
 import { convertPlain } from './converters/plainConverter';
-import { t, tFormat, formatStats } from './i18n';
+import { convertPdf } from './converters/pdfConverter';
+import { convertXlsx } from './converters/xlsxConverter';
+import { tFormat, formatStats } from './i18n';
 
 export class Importer {
 	app: App;
@@ -99,6 +101,11 @@ export class Importer {
 		switch (ext) {
 			case 'docx':
 				return convertDocx(buffer, this.settings.useWikilinks);
+			case 'pdf':
+				return convertPdf(buffer);
+			case 'xlsx':
+			case 'xls':
+				return convertXlsx(buffer, { outputMode: 'single' });
 			case 'txt':
 			case 'csv':
 				return convertPlain(buffer, ext);
