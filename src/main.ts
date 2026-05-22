@@ -2,17 +2,19 @@ import { Plugin } from 'obsidian';
 import { DocWeaverSettings, DEFAULT_SETTINGS } from './types';
 import { DocWeaverSettingTab } from './settings';
 import { Importer } from './importer';
+import { DropHandler } from './dropHandler';
 import { setLocale, t } from './i18n';
 
 export default class DocWeaverPlugin extends Plugin {
-	settings: DocWeaverSettings;
-	importer: Importer;
+	settings!: DocWeaverSettings;
+	importer!: Importer;
 
 	async onload() {
 		await this.loadSettings();
 		this.applyLocale();
 
 		this.importer = new Importer(this.app, this.settings);
+		new DropHandler(this.importer).register(this);
 
 		this.addCommand({
 			id: 'import-file',

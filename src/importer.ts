@@ -43,13 +43,13 @@ export class Importer {
 
 		const results: ImportResult[] = [];
 		for (const file of files) {
-			results.push(await this.importSingleFile(file));
+			results.push(await this.importSingleFile(file, { skipOpen: true }));
 		}
 		this.notifyBulk(results);
 		return results;
 	}
 
-	async importSingleFile(file: File): Promise<ImportResult> {
+	async importSingleFile(file: File, opts?: { skipOpen?: boolean }): Promise<ImportResult> {
 		const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
 		const sourceName = file.name;
 
@@ -88,7 +88,7 @@ export class Importer {
 				}
 			}
 
-			if (this.settings.openAfterImport) {
+			if (this.settings.openAfterImport && !opts?.skipOpen) {
 				const tfile = this.app.vault.getAbstractFileByPath(destPath);
 				if (tfile instanceof TFile) {
 					await this.app.workspace.getLeaf(false).openFile(tfile);
