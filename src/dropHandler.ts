@@ -26,6 +26,8 @@ export class DropHandler {
 		event.stopPropagation();
 
 		// Fire-and-forget; importFiles posts its own notices on completion
-		this.importer.importFiles(supported);
+		void this.importer.importFiles(supported).catch(err =>
+			console.error('Doc Weaver: drop import failed', err),
+		);
 	}
 }

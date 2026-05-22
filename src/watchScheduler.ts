@@ -20,7 +20,7 @@ export class WatchScheduler {
 		if (this.settings.watchIntervalMin <= 0 || folders.length === 0) return;
 
 		const ms = this.settings.watchIntervalMin * 60 * 1000;
-		this.tick(); // immediate first scan
+		void this.tick(); // immediate first scan; errors caught internally
 		this.timer = window.setInterval(() => this.tick(), ms);
 	}
 

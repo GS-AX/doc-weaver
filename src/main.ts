@@ -40,13 +40,10 @@ export default class DocWeaverPlugin extends Plugin {
 		});
 
 		this.addSettingTab(new DocWeaverSettingTab(this.app, this));
-
-		console.log('Doc Weaver loaded');
 	}
 
 	onunload() {
 		this.watchScheduler.stop();
-		console.log('Doc Weaver unloaded');
 	}
 
 	async loadSettings() {
