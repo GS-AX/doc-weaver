@@ -1,9 +1,12 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
+import { WorkerMessageHandler } from 'pdfjs-dist/build/pdf.worker.min.mjs';
 import { ConverterOutput, ConversionWarning } from '../types';
 
-// Disable the worker — Obsidian plugins run in a single thread
-pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+// Run pdfjs in fake-worker (main-thread) mode.
+// pdfjs checks globalThis.pdfjsWorker?.WorkerMessageHandler; if set, it skips
+// the real Worker thread and the GlobalWorkerOptions.workerSrc requirement entirely.
+(globalThis as any).pdfjsWorker = { WorkerMessageHandler };
 
 interface Line {
 	y: number;

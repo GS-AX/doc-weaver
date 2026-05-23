@@ -1,9 +1,7 @@
 /**
  * HWP / HWPx converter — beta quality.
  * .hwp  (binary HWP5): parsed with hwp.js library
- * .hwpx (ZIP+XML):     parsed with JSZip + DOMParser
- *
- * Both formats emit isBeta:true warnings per PRD.
+ * .hwpx (ZIP+XML):     parsed with fflate + DOMParser
  */
 import { unzipSync } from 'fflate';
 import { AssetData, ConverterOutput, ConversionWarning } from '../types';
@@ -32,10 +30,11 @@ interface DocInfo {
 	charShapes: CharShape[];
 	binData: BinData[];
 	getCharShpe(index: number): CharShape | undefined;
+	getCharShape(index: number): CharShape | undefined;
 }
 interface CharShape {
 	fontBaseSize: number;
-	attr: number; // bit flags: 0=bold, 1=italic, 2=underline, ...
+	attr: number;
 }
 interface BinData {
 	data: Uint8Array;
@@ -67,7 +66,7 @@ interface HWPTableCell {
 
 const CHAR_TYPE_CHAR = 0;
 
-// ── Korean style name → heading level ─────────────────────────────────────────
+// ── Korean style name → heading level ────────────────────────────────────────
 const STYLE_HEADING_MAP: Record<string, number> = {
 	'제목 1': 1, '제목 2': 2, '제목 3': 3,
 	'제목 4': 4, '제목 5': 5, '제목 6': 6,
@@ -106,7 +105,6 @@ export async function convertHwp(buffer: ArrayBuffer): Promise<ConverterOutput> 
 	let tableCount = 0;
 	let imgIdx = 0;
 
-	// Collect all font sizes to compute median for heading heuristic
 	const fontSizes: number[] = [];
 	for (const section of doc.sections) {
 		for (const para of section.content) {
@@ -118,7 +116,6 @@ export async function convertHwp(buffer: ArrayBuffer): Promise<ConverterOutput> 
 
 	for (const section of doc.sections) {
 		for (const para of section.content) {
-			// Tables embedded in paragraph controls
 			for (const ctrl of para.controls) {
 				if (ctrl.cells) {
 					lines.push(hwpTableToMd(ctrl.cells));
@@ -146,7 +143,6 @@ export async function convertHwp(buffer: ArrayBuffer): Promise<ConverterOutput> 
 		}
 	}
 
-	// Extract binary images from binData
 	for (const bin of doc.info.binData) {
 		if (bin.data?.length) {
 			const filename = `image-${String(++imgIdx).padStart(3, '0')}.${bin.extension || 'png'}`;
@@ -165,9 +161,11 @@ export async function convertHwp(buffer: ArrayBuffer): Promise<ConverterOutput> 
 }
 
 function getParaFontSize(para: HWPParagraph, info: DocInfo): number {
-	const ptr = para.shapeBuffer[0];
+	const ptr = para.shapeBuffer?.[0];
 	if (!ptr) return 0;
-	return info.getCharShpe(ptr.shapeIndex)?.fontBaseSize ?? 0;
+	// hwp.js has a typo in some versions; try both spellings
+	const getter = info.getCharShpe ?? info.getCharShape;
+	return getter?.call(info, ptr.shapeIndex)?.fontBaseSize ?? 0;
 }
 
 function fontSizeToHeadingLevel(size: number, medianSize: number): number {
@@ -202,6 +200,25 @@ function hwpTableToMd(cells: HWPTableCell[][]): string {
 
 // ── HWPx (.hwpx, ZIP + XML) ───────────────────────────────────────────────────
 
+// HWPx XML uses namespace prefixes like <hh:P>, <hh:T>, <hh:RUN>, etc.
+// querySelectorAll('P') does NOT match <hh:P> in namespace-aware XML parsing.
+// Use getElementsByTagName('*') + localName filter instead.
+function byLocalName(node: Document | Element, ...names: string[]): Element[] {
+	const upper = new Set(names.map(n => n.toUpperCase()));
+	const root = node instanceof Document ? node.documentElement : node;
+	if (!root) return [];
+	return Array.from(root.getElementsByTagName('*')).filter(el => upper.has(el.localName.toUpperCase()));
+}
+
+function isInsideCell(el: Element): boolean {
+	let cur = el.parentElement;
+	while (cur) {
+		if (['CELL', 'TD'].includes(cur.localName.toUpperCase())) return true;
+		cur = cur.parentElement;
+	}
+	return false;
+}
+
 export async function convertHwpx(buffer: ArrayBuffer, useWikilinks: boolean): Promise<ConverterOutput> {
 	const warnings: ConversionWarning[] = [
 		{ message: 'HWPx conversion is best-effort. Formatting may be lost.', isBeta: true },
@@ -216,7 +233,7 @@ export async function convertHwpx(buffer: ArrayBuffer, useWikilinks: boolean): P
 	const styleMap = buildHwpxStyleMap(zip);
 
 	const sectionPaths = Object.keys(zip)
-		.filter(p => /contents\/section\d+\.xml$/i.test(p))
+		.filter(p => /section\d+\.xml$/i.test(p))
 		.sort();
 
 	if (sectionPaths.length === 0) {
@@ -229,17 +246,19 @@ export async function convertHwpx(buffer: ArrayBuffer, useWikilinks: boolean): P
 		if (!xml) continue;
 		const doc = new DOMParser().parseFromString(xml, 'text/xml');
 		const { md, h, t } = parseHwpxSection(doc, styleMap, useWikilinks);
-		lines.push(md);
+		if (md) lines.push(md);
 		headingCount += h;
 		tableCount += t;
 	}
 
+	// Images: HWPx stores them in BinData/ at the root or inside Contents/
 	let imgIdx = 0;
-	const binPaths = Object.keys(zip).filter(p => /contents\/bindata\//i.test(p) && !p.endsWith('/'));
+	const binPaths = Object.keys(zip).filter(p => /bindata\//i.test(p) && !p.endsWith('/'));
 	for (const binPath of binPaths) {
 		const data = zipBinary(zip, binPath);
 		if (!data) continue;
 		const ext = binPath.split('.').pop()?.toLowerCase() ?? 'png';
+		if (!['png', 'jpg', 'jpeg', 'gif', 'bmp', 'wmf', 'emf'].includes(ext)) continue;
 		const filename = `image-${String(++imgIdx).padStart(3, '0')}.${ext}`;
 		assets.push({ filename, data, mimeType: extToMime(ext) });
 	}
@@ -257,14 +276,19 @@ export async function convertHwpx(buffer: ArrayBuffer, useWikilinks: boolean): P
 function buildHwpxStyleMap(zip: ZipFiles): Map<string, number> {
 	const map = new Map<string, number>();
 
-	const candidates = ['Contents/header.xml', 'Contents/section0.xml', 'header.xml'];
+	// Find header.xml regardless of path casing or directory depth
+	const headerPath = Object.keys(zip).find(p => /header\.xml$/i.test(p));
+	const candidates = headerPath
+		? [headerPath]
+		: ['Contents/header.xml', 'header.xml'];
+
 	for (const path of candidates) {
 		const xml = zipText(zip, path);
 		if (!xml) continue;
 
 		const doc = new DOMParser().parseFromString(xml, 'text/xml');
-		// Match both STYLE and ParaStyle elements
-		const styles = Array.from(doc.querySelectorAll('STYLE, PARASTYLE, ParaStyle'));
+		// Match both namespaced and non-namespaced style elements
+		const styles = byLocalName(doc, 'PARASTYLE', 'STYLE');
 		for (const el of styles) {
 			const id = el.getAttribute('Id') ?? el.getAttribute('id') ?? '';
 			const name = el.getAttribute('Name') ?? el.getAttribute('name') ?? '';
@@ -280,20 +304,24 @@ function buildHwpxStyleMap(zip: ZipFiles): Map<string, number> {
 function parseHwpxSection(
 	doc: Document,
 	styleMap: Map<string, number>,
-	useWikilinks: boolean,
+	_useWikilinks: boolean,
 ): { md: string; h: number; t: number } {
 	const lines: string[] = [];
 	let h = 0;
 	let t = 0;
 
-	// Paragraphs — try multiple tag names for compatibility
-	const paras = Array.from(doc.querySelectorAll('P, Para, para'));
+	// Paragraphs — use localName matching to handle namespace prefixes (e.g. hh:P)
+	const paras = byLocalName(doc, 'P', 'PARA');
 
 	for (const para of paras) {
-		// Skip paragraphs inside table cells (handled separately)
-		if (para.closest('CELL, Cell, TD, cell')) continue;
+		// Skip paragraphs that are inside table cells (handled by table parser)
+		if (isInsideCell(para)) continue;
 
-		const styleId = para.getAttribute('StyleId') ?? para.getAttribute('StyleID') ?? para.getAttribute('styleId') ?? '';
+		const styleId =
+			para.getAttribute('StyleId') ??
+			para.getAttribute('StyleID') ??
+			para.getAttribute('styleId') ??
+			'';
 		const headingLevel = styleMap.get(styleId) ?? 0;
 
 		const text = extractHwpxText(para).trim();
@@ -308,34 +336,38 @@ function parseHwpxSection(
 	}
 
 	// Tables
-	const tables = Array.from(doc.querySelectorAll('TABLE, Table, table'));
+	const tables = byLocalName(doc, 'TABLE', 'TBL');
 	for (const tbl of tables) {
-		lines.push(hwpxTableToMd(tbl));
-		t++;
+		const mdTable = hwpxTableToMd(tbl);
+		if (mdTable) {
+			lines.push(mdTable);
+			t++;
+		}
 	}
 
 	return { md: lines.join('\n\n'), h, t };
 }
 
 function extractHwpxText(el: Element): string {
-	// Collect text from CHAR, Char, T elements
-	const charEls = el.querySelectorAll('CHAR, Char, T, text');
-	if (charEls.length > 0) {
-		return Array.from(charEls).map(c => c.textContent ?? '').join('');
+	// HWPx uses <hh:T> (or <T>) for text runs; also try <hh:RUN>/<hh:CHAR>
+	const textEls = byLocalName(el, 'T', 'CHAR');
+	if (textEls.length > 0) {
+		return textEls.map(c => c.textContent ?? '').join('');
 	}
-	// Fallback: direct text content
+	// Fallback: direct text content (strips all child element tags)
 	return el.textContent ?? '';
 }
 
 function hwpxTableToMd(tbl: Element): string {
-	const rows = Array.from(tbl.querySelectorAll('ROW, Row, TR, tr'));
+	const rows = byLocalName(tbl, 'ROW', 'TR');
 	const data = rows.map(row =>
-		Array.from(row.querySelectorAll('CELL, Cell, TD, td')).map(cell =>
+		byLocalName(row, 'CELL', 'TD').map(cell =>
 			extractHwpxText(cell).replace(/\|/g, '\\|').trim(),
 		),
 	);
 	if (data.length === 0) return '';
 	const colCount = Math.max(...data.map(r => r.length));
+	if (colCount === 0) return '';
 	const pad = (r: string[]) => { while (r.length < colCount) r.push(''); return r; };
 	const header = pad(data[0]);
 	const sep = header.map(() => '---');

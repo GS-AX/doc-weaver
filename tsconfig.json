@@ -9,7 +9,8 @@
     "importHelpers": true,
     "isolatedModules": true,
     "strictNullChecks": true,
-    "lib": ["ES2018", "DOM"]
+    "lib": ["ES2020", "DOM"],
+    "types": ["node"]
   },
   "include": ["src/**/*.ts"]
 }
