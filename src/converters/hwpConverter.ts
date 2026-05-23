@@ -5,8 +5,19 @@
  *
  * Both formats emit isBeta:true warnings per PRD.
  */
-import JSZip from 'jszip';
+import { unzipSync } from 'fflate';
 import { AssetData, ConverterOutput, ConversionWarning } from '../types';
+
+type ZipFiles = Record<string, Uint8Array>;
+function zipText(files: ZipFiles, path: string): string {
+	const data = files[path];
+	return data ? new TextDecoder('utf-8').decode(data) : '';
+}
+function zipBinary(files: ZipFiles, path: string): ArrayBuffer | undefined {
+	const data = files[path];
+	if (!data) return undefined;
+	return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+}
 
 // hwp.js types (CJS import)
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -196,17 +207,15 @@ export async function convertHwpx(buffer: ArrayBuffer, useWikilinks: boolean): P
 		{ message: 'HWPx conversion is best-effort. Formatting may be lost.', isBeta: true },
 	];
 
-	const zip = await JSZip.loadAsync(buffer);
+	const zip = unzipSync(new Uint8Array(buffer));
 	const assets: AssetData[] = [];
 	const lines: string[] = [];
 	let headingCount = 0;
 	let tableCount = 0;
 
-	// Load styles from whichever file has the STYLELIST
-	const styleMap = await buildHwpxStyleMap(zip);
+	const styleMap = buildHwpxStyleMap(zip);
 
-	// Find section XML files
-	const sectionPaths = Object.keys(zip.files)
+	const sectionPaths = Object.keys(zip)
 		.filter(p => /contents\/section\d+\.xml$/i.test(p))
 		.sort();
 
@@ -216,9 +225,8 @@ export async function convertHwpx(buffer: ArrayBuffer, useWikilinks: boolean): P
 	}
 
 	for (const sectionPath of sectionPaths) {
-		const xml = await zip.file(sectionPath)?.async('string') ?? '';
+		const xml = zipText(zip, sectionPath);
 		if (!xml) continue;
-
 		const doc = new DOMParser().parseFromString(xml, 'text/xml');
 		const { md, h, t } = parseHwpxSection(doc, styleMap, useWikilinks);
 		lines.push(md);
@@ -226,11 +234,10 @@ export async function convertHwpx(buffer: ArrayBuffer, useWikilinks: boolean): P
 		tableCount += t;
 	}
 
-	// Extract binary images from BinData folder
 	let imgIdx = 0;
-	const binPaths = Object.keys(zip.files).filter(p => /contents\/bindata\//i.test(p) && !zip.files[p].dir);
+	const binPaths = Object.keys(zip).filter(p => /contents\/bindata\//i.test(p) && !p.endsWith('/'));
 	for (const binPath of binPaths) {
-		const data = await zip.file(binPath)?.async('arraybuffer');
+		const data = zipBinary(zip, binPath);
 		if (!data) continue;
 		const ext = binPath.split('.').pop()?.toLowerCase() ?? 'png';
 		const filename = `image-${String(++imgIdx).padStart(3, '0')}.${ext}`;
@@ -247,13 +254,12 @@ export async function convertHwpx(buffer: ArrayBuffer, useWikilinks: boolean): P
 	};
 }
 
-async function buildHwpxStyleMap(zip: JSZip): Promise<Map<string, number>> {
+function buildHwpxStyleMap(zip: ZipFiles): Map<string, number> {
 	const map = new Map<string, number>();
 
-	// Try header.xml first, then section0.xml
 	const candidates = ['Contents/header.xml', 'Contents/section0.xml', 'header.xml'];
 	for (const path of candidates) {
-		const xml = await zip.file(path)?.async('string') ?? '';
+		const xml = zipText(zip, path);
 		if (!xml) continue;
 
 		const doc = new DOMParser().parseFromString(xml, 'text/xml');

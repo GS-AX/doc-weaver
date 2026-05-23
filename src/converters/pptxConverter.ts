@@ -1,5 +1,18 @@
-import JSZip from 'jszip';
+import { unzipSync } from 'fflate';
 import { AdditionalFile, AssetData, ConverterOutput, ConversionWarning } from '../types';
+
+type ZipFiles = Record<string, Uint8Array>;
+
+function zipText(files: ZipFiles, path: string): string {
+	const data = files[path];
+	return data ? new TextDecoder('utf-8').decode(data) : '';
+}
+
+function zipBinary(files: ZipFiles, path: string): ArrayBuffer | undefined {
+	const data = files[path];
+	if (!data) return undefined;
+	return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+}
 
 // OOXML namespace URIs
 const A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
@@ -34,18 +47,18 @@ interface ParsedSlide {
 // ── Public entry point ────────────────────────────────────────────────────────
 
 export async function convertPptx(buffer: ArrayBuffer, options: PptxOptions): Promise<ConverterOutput> {
-	const zip = await JSZip.loadAsync(buffer);
+	const zip = unzipSync(new Uint8Array(buffer));
 	const warnings: ConversionWarning[] = [];
 	const allAssets: AssetData[] = [];
 
-	const deckTitle = await getDeckTitle(zip);
-	const slidePaths = await getSlideOrder(zip);
+	const deckTitle = getDeckTitle(zip);
+	const slidePaths = getSlideOrder(zip);
 
 	const slides: ParsedSlide[] = [];
 	let imgCounter = 0;
 
 	for (let i = 0; i < slidePaths.length; i++) {
-		const slide = await parseSlide(zip, slidePaths[i], i + 1, imgCounter, options.useWikilinks);
+		const slide = parseSlide(zip, slidePaths[i], i + 1, imgCounter, options.useWikilinks);
 		imgCounter += slide.assets.length;
 		slides.push(slide);
 		allAssets.push(...slide.assets);
@@ -110,8 +123,8 @@ function parseRels(xml: string): RelEntry[] {
 
 // ── Presentation-level helpers ────────────────────────────────────────────────
 
-async function getDeckTitle(zip: JSZip): Promise<string> {
-	const coreXml = await zip.file('docProps/core.xml')?.async('string') ?? '';
+function getDeckTitle(zip: ZipFiles): string {
+	const coreXml = zipText(zip, 'docProps/core.xml');
 	if (coreXml) {
 		const doc = parseXml(coreXml);
 		const title = doc.getElementsByTagNameNS(DC, 'title')[0]?.textContent?.trim();
@@ -120,16 +133,14 @@ async function getDeckTitle(zip: JSZip): Promise<string> {
 	return '';
 }
 
-async function getSlideOrder(zip: JSZip): Promise<string[]> {
-	const relsXml = await zip.file('ppt/_rels/presentation.xml.rels')?.async('string') ?? '';
+function getSlideOrder(zip: ZipFiles): string[] {
+	const relsXml = zipText(zip, 'ppt/_rels/presentation.xml.rels');
 	const rels = parseRels(relsXml);
 	const slideRels = rels.filter(r => r.type === REL_SLIDE);
 
-	// Map rId → resolved path
 	const idToPath = new Map(slideRels.map(r => [r.id, resolvePath('ppt/presentation.xml', r.target)]));
 
-	// Use slide order from presentation.xml
-	const presXml = await zip.file('ppt/presentation.xml')?.async('string') ?? '';
+	const presXml = zipText(zip, 'ppt/presentation.xml');
 	if (presXml) {
 		const doc = parseXml(presXml);
 		const sldIds = Array.from(doc.getElementsByTagNameNS(P, 'sldId'));
@@ -147,17 +158,17 @@ async function getSlideOrder(zip: JSZip): Promise<string[]> {
 
 // ── Slide parser ──────────────────────────────────────────────────────────────
 
-async function parseSlide(
-	zip: JSZip,
+function parseSlide(
+	zip: ZipFiles,
 	slidePath: string,
 	slideNum: number,
 	imgOffset: number,
 	useWikilinks: boolean,
-): Promise<ParsedSlide> {
-	const slideXml = await zip.file(slidePath)?.async('string') ?? '';
+): ParsedSlide {
+	const slideXml = zipText(zip, slidePath);
 	const slideDoc = parseXml(slideXml);
 
-	const relsXml = await zip.file(relsPathFor(slidePath))?.async('string') ?? '';
+	const relsXml = zipText(zip, relsPathFor(slidePath));
 	const rels = parseRels(relsXml);
 	const relById = new Map(rels.map(r => [r.id, r]));
 
@@ -167,7 +178,6 @@ async function parseSlide(
 	let tableCount = 0;
 	let imgIdx = imgOffset;
 
-	// Text shapes
 	for (const sp of Array.from(slideDoc.getElementsByTagNameNS(P, 'sp'))) {
 		const phEl = getNS(sp, P, 'ph') ?? getNS(sp, P, 'nvSpPr/nvPr/ph');
 		const phType = phEl?.getAttribute('type') ?? '';
@@ -185,7 +195,6 @@ async function parseSlide(
 		}
 	}
 
-	// Tables
 	for (const frame of Array.from(slideDoc.getElementsByTagNameNS(P, 'graphicFrame'))) {
 		const tbl = frame.getElementsByTagNameNS(A, 'tbl')[0];
 		if (!tbl) continue;
@@ -193,7 +202,6 @@ async function parseSlide(
 		tableCount++;
 	}
 
-	// Images
 	for (const pic of Array.from(slideDoc.getElementsByTagNameNS(P, 'pic'))) {
 		const blipFill = pic.getElementsByTagNameNS(P, 'blipFill')[0];
 		const blip = blipFill?.getElementsByTagNameNS(A, 'blip')[0];
@@ -202,26 +210,20 @@ async function parseSlide(
 		if (!rel || rel.type !== REL_IMAGE) continue;
 
 		const mediaPath = resolvePath(slidePath, rel.target);
-		const data = await zip.file(mediaPath)?.async('arraybuffer');
+		const data = zipBinary(zip, mediaPath);
 		if (!data) continue;
 
 		const ext = mediaPath.split('.').pop()?.toLowerCase() ?? 'png';
 		const filename = `image-${String(++imgIdx).padStart(3, '0')}.${ext}`;
 		assets.push({ filename, data, mimeType: extToMime(ext) });
-
-		const link = useWikilinks ? `![[${filename}]]` : `![](${filename})`;
-		bodyParts.push(link);
+		bodyParts.push(useWikilinks ? `![[${filename}]]` : `![](${filename})`);
 	}
 
-	// Speaker notes
 	const notesRel = rels.find(r => r.type === REL_NOTES);
 	let notesMd = '';
 	if (notesRel) {
-		const notesPath = resolvePath(slidePath, notesRel.target);
-		const notesXml = await zip.file(notesPath)?.async('string') ?? '';
-		if (notesXml) {
-			notesMd = extractNotes(parseXml(notesXml));
-		}
+		const notesXml = zipText(zip, resolvePath(slidePath, notesRel.target));
+		if (notesXml) notesMd = extractNotes(parseXml(notesXml));
 	}
 
 	return {
