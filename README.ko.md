@@ -1,8 +1,19 @@
-# Doc Weaver
+# Document Weaver
 
 > **[English README](README.md)**
 
-로컬 문서(Word, PowerPoint, PDF, HWP 등)를 Markdown으로 변환해 Obsidian Vault에 바로 저장하는 커뮤니티 플러그인입니다.  
+**복붙은 그만. 파일을 드롭하면 노트가 됩니다.**
+
+Word, PDF, PowerPoint, Excel, HWP 파일을 깔끔한 Markdown으로 즉시 변환합니다. 파일을 창에 드래그하거나, 감시 폴더를 Downloads에 연결하거나, 커맨드 팔레트에서 선택하세요. 이미지는 자동 추출, 프론트매터는 자동 삽입.
+
+- 📄 **DOCX** — 제목, 굵기, 기울임, 표, 이미지 완벽 보존
+- 📑 **PDF** — 텍스트 레이어 추출 + 폰트 크기 기반 제목 감지
+- 📊 **PPTX** — 단일 노트 또는 슬라이드별 노트 분리, 발표자 노트 포함
+- 📈 **XLSX / XLS** — 시트마다 GitHub 표(GFM)로 변환
+- 🇰🇷 **HWP / HWPx** — 한글 문서 지원 *(베타)*
+- 📝 **TXT / CSV** — 그대로 또는 표 형식으로 변환
+
+API 키 없음. 클라우드 없음. 완전 오프라인.  
 [Confluence Weaver](https://github.com/GS-AX/confluence-weaver)의 로컬 파일 버전입니다.
 
 ---
