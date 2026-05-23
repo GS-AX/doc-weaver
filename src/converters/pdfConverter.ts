@@ -1,155 +1,149 @@
-import * as zlib from 'zlib';
+import * as pdfjsLib from 'pdfjs-dist';
+import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 import { ConverterOutput, ConversionWarning } from '../types';
+
+// Disable the worker — Obsidian plugins run in a single thread
+pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+
+interface Line {
+	y: number;
+	fontSize: number;
+	text: string;
+}
 
 export async function convertPdf(buffer: ArrayBuffer): Promise<ConverterOutput> {
 	const warnings: ConversionWarning[] = [];
-	try {
-		const pages = await extractPages(Buffer.from(buffer));
-		const allText = pages.filter(p => p.trim()).join('\n\n---\n\n').trim();
-		if (!allText) return buildScannedStub(warnings);
-		const markdown = textToMarkdown(allText);
-		return { markdown, warnings, stats: countStats(markdown), assets: [] };
-	} catch {
+
+	const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer), useWorkerFetch: false, useSystemFonts: true });
+	const pdf = await loadingTask.promise;
+
+	const allLines: Line[] = [];
+	let hasTextLayer = false;
+
+	for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+		const page = await pdf.getPage(pageNum);
+		const content = await page.getTextContent();
+
+		const items = content.items.filter((item): item is TextItem => 'str' in item && item.str.trim() !== '');
+		if (items.length > 0) hasTextLayer = true;
+
+		const lines = groupIntoLines(items);
+		allLines.push(...lines);
+
+		if (pageNum < pdf.numPages && lines.length > 0) {
+			allLines.push({ y: -1, fontSize: 0, text: '---PAGE_BREAK---' });
+		}
+	}
+
+	if (!hasTextLayer) {
 		return buildScannedStub(warnings);
 	}
+
+	const markdown = linesToMarkdown(allLines);
+
+	return {
+		markdown,
+		warnings,
+		stats: countStats(markdown),
+		assets: [],
+	};
 }
 
-async function extractPages(buf: Buffer): Promise<string[]> {
-	const raw = buf.toString('binary');
-	const pages: string[] = [];
+function groupIntoLines(items: TextItem[]): Line[] {
+	if (items.length === 0) return [];
 
-	// Match PDF stream objects: <<header>> stream\n...\nendstream
-	const streamRe = /<<([\s\S]{1,800}?)>>\s*stream\r?\n([\s\S]*?)\r?\nendstream/g;
-	let m: RegExpExecArray | null;
-
-	while ((m = streamRe.exec(raw)) !== null) {
-		const header = m[1];
-		const body = m[2];
-
-		// Skip image/font/metadata streams
-		if (/\/Subtype\s*\/(Image|Form|XML|Metadata|Type1C|CIDFontType|OpenType)/i.test(header)) continue;
-		// Only process streams likely to contain page text
-		if (header.includes('/Type') && !/\/Page/i.test(header) && !/\/Content/i.test(header) && !/\/Resources/i.test(header)) {
-			// Allow if no /Type at all (most content streams have no /Type)
-		}
-
-		let content: string;
-		if (/\/Filter\s*\/FlateDecode/.test(header)) {
-			try {
-				content = (await zlibInflate(Buffer.from(body, 'binary'))).toString('binary');
-			} catch {
-				continue;
-			}
-		} else if (/\/Filter/.test(header)) {
-			continue; // Other filters unsupported
-		} else {
-			content = body;
-		}
-
-		const text = parseContentStream(content);
-		if (text.trim()) pages.push(text);
-	}
-
-	return pages;
-}
-
-function zlibInflate(buf: Buffer): Promise<Buffer> {
-	return new Promise((resolve, reject) => {
-		zlib.inflate(buf, (err, result) => {
-			if (!err) { resolve(result); return; }
-			zlib.inflateRaw(buf, (err2, result2) => {
-				if (!err2) resolve(result2);
-				else reject(err2);
-			});
-		});
+	const sorted = [...items].sort((a, b) => {
+		const ay = a.transform[5];
+		const by = b.transform[5];
+		if (Math.abs(ay - by) > 2) return by - ay;
+		return a.transform[4] - b.transform[4];
 	});
-}
 
-function parseContentStream(stream: string): string {
-	const lines: string[] = [];
-	let cur = '';
+	const lines: Line[] = [];
+	let currentLine: TextItem[] = [sorted[0]];
+	let currentY = sorted[0].transform[5];
 
-	// Match BT...ET blocks
-	const btEt = /BT\b([\s\S]*?)\bET\b/g;
-	let block: RegExpExecArray | null;
-
-	while ((block = btEt.exec(stream)) !== null) {
-		const ops = block[1];
-		cur = '';
-
-		// Tokenise: (string)Tj  (string)'  [(arr)]TJ  TD Td T*
-		const tok = /\(([^)\\]*(?:\\.[^)\\]*)*)\)\s*(?:Tj|'|")|\[([\s\S]*?)\]\s*TJ|T[Dd*]/g;
-		let t: RegExpExecArray | null;
-
-		while ((t = tok.exec(ops)) !== null) {
-			const full = t[0];
-			if (full.startsWith('(')) {
-				cur += decodePdfStr(t[1]);
-			} else if (full.startsWith('[')) {
-				cur += decodeTJArray(t[2]);
-			} else {
-				// Td / TD / T* → new line
-				if (cur.trim()) { lines.push(cur.trim()); cur = ''; }
-			}
-		}
-
-		if (cur.trim()) lines.push(cur.trim());
-	}
-
-	return lines.join('\n');
-}
-
-function decodeTJArray(inner: string): string {
-	const out: string[] = [];
-	const re = /\(([^)\\]*(?:\\.[^)\\]*)*)\)|-?\d+\.?\d*/g;
-	let m: RegExpExecArray | null;
-	while ((m = re.exec(inner)) !== null) {
-		if (m[0].startsWith('(')) {
-			out.push(decodePdfStr(m[1]));
+	for (let i = 1; i < sorted.length; i++) {
+		const item = sorted[i];
+		const y = item.transform[5];
+		if (Math.abs(y - currentY) <= 3) {
+			currentLine.push(item);
 		} else {
-			const n = parseFloat(m[0]);
-			if (n < -200) out.push(' '); // large negative kerning = word space
+			lines.push(mergeLine(currentLine));
+			currentLine = [item];
+			currentY = y;
 		}
 	}
-	return out.join('');
+	lines.push(mergeLine(currentLine));
+
+	return lines;
 }
 
-function decodePdfStr(s: string): string {
-	return s
-		.replace(/\\(\d{3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)))
-		.replace(/\\n/g, '\n').replace(/\\r/g, '').replace(/\\t/g, '\t')
-		.replace(/\\(.)/g, '$1');
-}
+function mergeLine(items: TextItem[]): Line {
+	const fontSize = Math.abs(items[0].transform[3]);
+	const y = items[0].transform[5];
 
-function textToMarkdown(text: string): string {
-	const out: string[] = [];
-	for (const line of text.split('\n')) {
-		const t = line.trim();
-		if (!t) continue;
-		const lvl = headingLevel(t);
-		out.push(lvl ? `${'#'.repeat(lvl)} ${t}` : t);
+	const xs = items.map(i => i.transform[4]);
+	const midX = (Math.min(...xs) + Math.max(...xs)) / 2;
+	const leftItems = items.filter(i => i.transform[4] <= midX);
+	const rightItems = items.filter(i => i.transform[4] > midX);
+
+	let text: string;
+	if (rightItems.length > 0 && leftItems.length > 0 && rightItems[0].transform[4] - leftItems[leftItems.length - 1].transform[4] > 100) {
+		text = [...leftItems, ...rightItems].map(i => i.str).join(' ').trim();
+	} else {
+		text = items.map(i => i.str).join(' ').trim();
 	}
-	return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+
+	return { y, fontSize, text };
 }
 
-function headingLevel(line: string): number {
-	if (line.length > 80) return 0;
-	if (/^\d+\.\d+\s+\S/.test(line) && line.length < 60) return 3;   // "1.1 Title"
-	if (/^\d+\s+[A-Z]/.test(line) && line.length < 60) return 2;      // "1 Title"
-	if (line === line.toUpperCase() && /[A-Z]{3}/.test(line) && line.length < 50) return 2; // ALL CAPS
-	return 0;
+function linesToMarkdown(lines: Line[]): string {
+	if (lines.length === 0) return '';
+
+	const sizes = lines.filter(l => l.fontSize > 0).map(l => l.fontSize).sort((a, b) => a - b);
+	const median = sizes[Math.floor(sizes.length / 2)] ?? 12;
+
+	const parts: string[] = [];
+
+	for (const line of lines) {
+		if (line.text === '---PAGE_BREAK---') {
+			parts.push('\n---\n');
+			continue;
+		}
+		if (!line.text) continue;
+
+		const ratio = line.fontSize / median;
+
+		if (ratio >= 2.0) {
+			parts.push(`\n# ${line.text}\n`);
+		} else if (ratio >= 1.6) {
+			parts.push(`\n## ${line.text}\n`);
+		} else if (ratio >= 1.4) {
+			parts.push(`\n### ${line.text}\n`);
+		} else {
+			parts.push(line.text);
+		}
+	}
+
+	return parts.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function buildScannedStub(warnings: ConversionWarning[]): ConverterOutput {
-	warnings.push({ message: 'PDF has no extractable text layer (scanned or encrypted).' });
-	const markdown = '> ⚠️ This PDF has no extractable text layer (scanned image or encrypted).\n> Original file is referenced in the frontmatter above.';
-	return { markdown, warnings, stats: { headings: 0, images: 0, tables: 0 }, assets: [], frontmatterExtra: { pdf_has_text_layer: false } };
+	warnings.push({ message: 'PDF has no text layer (scanned image). Text extraction was not possible.' });
+	const markdown = '> ⚠️ This PDF has no text layer (scanned image). Text extraction was not possible.\n> Original file is referenced in the frontmatter above.';
+	return {
+		markdown,
+		warnings,
+		stats: { headings: 0, images: 0, tables: 0 },
+		assets: [],
+		frontmatterExtra: { pdf_has_text_layer: false },
+	};
 }
 
 function countStats(md: string): { headings: number; images: number; tables: number } {
-	return {
-		headings: (md.match(/^#{1,6} /gm) ?? []).length,
-		images: 0,
-		tables: (md.match(/^\|/gm) ?? []).length > 0 ? 1 : 0,
-	};
+	const headings = (md.match(/^#{1,6} /gm) ?? []).length;
+	const images = (md.match(/!\[/g) ?? []).length;
+	const tables = (md.match(/^\|/gm) ?? []).length > 0 ? 1 : 0;
+	return { headings, images, tables };
 }
