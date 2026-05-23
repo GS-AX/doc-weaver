@@ -172,21 +172,45 @@ function convertTable(
 	if (rows.length === 0) return '';
 	stats.tables++;
 
-	const tableData: string[][] = rows.map(row =>
-		Array.from(row.querySelectorAll('th, td')).map(cell =>
-			nodeToMd(cell, depth, stats, wikilinks).trim().replace(/\|/g, '\\|').replace(/\n/g, ' '),
-		),
+	// Build a proper 2D grid that handles colspan and rowspan.
+	// occupied maps "r,c" -> cell text; cells filled by a span get empty string.
+	const occupied = new Map<string, string>();
+	const rowWidths: number[] = [];
+
+	for (let ri = 0; ri < rows.length; ri++) {
+		let ci = 0;
+		for (const cell of Array.from(rows[ri].querySelectorAll('th, td'))) {
+			// Advance past columns already filled by a rowspan from a previous row
+			while (occupied.has(`${ri},${ci}`)) ci++;
+
+			const colspan = Math.max(1, parseInt(cell.getAttribute('colspan') ?? '1') || 1);
+			const rowspan = Math.max(1, parseInt(cell.getAttribute('rowspan') ?? '1') || 1);
+			const text = nodeToMd(cell, depth, stats, wikilinks).trim().replace(/\|/g, '\\|').replace(/\n/g, ' ');
+
+			for (let dr = 0; dr < rowspan; dr++) {
+				for (let dc = 0; dc < colspan; dc++) {
+					// Only the top-left cell of the span gets the text; the rest get ''
+					occupied.set(`${ri + dr},${ci + dc}`, dr === 0 && dc === 0 ? text : '');
+				}
+			}
+			ci += colspan;
+		}
+		// Count trailing rowspan-filled cells
+		while (occupied.has(`${ri},${ci}`)) ci++;
+		rowWidths.push(ci);
+	}
+
+	const numRows = rows.length;
+	const numCols = Math.max(...rowWidths, 0);
+	if (numCols === 0) return '';
+
+	const grid = Array.from({ length: numRows }, (_, ri) =>
+		Array.from({ length: numCols }, (_, ci) => occupied.get(`${ri},${ci}`) ?? ''),
 	);
 
-	const colCount = Math.max(...tableData.map(r => r.length));
-	const pad = (row: string[]) => {
-		while (row.length < colCount) row.push('');
-		return row;
-	};
-
-	const header = pad(tableData[0]);
+	const header = grid[0];
 	const separator = header.map(() => '---');
-	const body = tableData.slice(1).map(pad);
+	const body = grid.slice(1);
 
 	const lines = [
 		`| ${header.join(' | ')} |`,

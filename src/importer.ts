@@ -118,7 +118,7 @@ export class Importer {
 			case 'docx':
 				return convertDocx(buffer, this.settings.useWikilinks);
 			case 'pdf':
-				return convertPdf(buffer);
+				return convertPdf(buffer, this.settings.useWikilinks);
 			case 'pptx':
 				return convertPptx(buffer, {
 					outputMode: this.settings.pptxOutput,
@@ -197,9 +197,19 @@ export class Importer {
 	}
 
 	private resolveAssetLinks(markdown: string, noteName: string): string {
-		if (this.settings.useWikilinks) return markdown;
-		const assetBase = `${this.settings.destinationFolder}/${this.settings.assetSubfolder}/${noteName}`;
-		// Replace bare filenames (no path separators) in markdown image links
+		const assetBase = normalizePath(`${this.settings.destinationFolder}/${this.settings.assetSubfolder}/${noteName}`);
+
+		if (this.settings.useWikilinks) {
+			// Replace bare ![[filename.ext]] with path-qualified ![[assetBase/filename.ext]].
+			// Without this, Obsidian searches the whole vault and resolves all same-named
+			// assets (e.g. page-001.jpg from different PDFs) to the same file.
+			return markdown.replace(
+				/!\[\[([^\]/|#]+\.[a-zA-Z]{2,5})(|[^\]]*)?\]\]/g,
+				(_, filename, alias) => `![[${assetBase}/${filename}${alias ?? ''}]]`,
+			);
+		}
+
+		// Standard markdown: qualify bare filenames with the full asset path
 		return markdown.replace(/!\[([^\]]*)\]\(([^/)(]+\.[a-zA-Z]{2,5})\)/g, (_, alt, filename) => {
 			return `![${alt}](${assetBase}/${filename})`;
 		});

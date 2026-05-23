@@ -1,7 +1,7 @@
 import * as pdfjsLib from 'pdfjs-dist';
-import type { TextItem } from 'pdfjs-dist/types/src/display/api';
+import type { TextItem, PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
 import { WorkerMessageHandler } from 'pdfjs-dist/build/pdf.worker.min.mjs';
-import { ConverterOutput, ConversionWarning } from '../types';
+import { AssetData, ConverterOutput, ConversionWarning } from '../types';
 
 // Run pdfjs in fake-worker (main-thread) mode.
 // pdfjs checks globalThis.pdfjsWorker?.WorkerMessageHandler; if set, it skips
@@ -14,7 +14,7 @@ interface Line {
 	text: string;
 }
 
-export async function convertPdf(buffer: ArrayBuffer): Promise<ConverterOutput> {
+export async function convertPdf(buffer: ArrayBuffer, useWikilinks = true): Promise<ConverterOutput> {
 	const warnings: ConversionWarning[] = [];
 
 	const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer), useWorkerFetch: false, useSystemFonts: true });
@@ -39,7 +39,7 @@ export async function convertPdf(buffer: ArrayBuffer): Promise<ConverterOutput> 
 	}
 
 	if (!hasTextLayer) {
-		return buildScannedStub(warnings);
+		return renderScannedPages(pdf, warnings, useWikilinks);
 	}
 
 	const markdown = linesToMarkdown(allLines);
@@ -51,6 +51,73 @@ export async function convertPdf(buffer: ArrayBuffer): Promise<ConverterOutput> 
 		assets: [],
 	};
 }
+
+// ── Scanned PDF: render each page to JPEG and embed as images ────────────────
+
+async function renderScannedPages(
+	pdf: PDFDocumentProxy,
+	warnings: ConversionWarning[],
+	useWikilinks: boolean,
+): Promise<ConverterOutput> {
+	warnings.push({ message: `PDF has no text layer. ${pdf.numPages} page(s) rendered as images.` });
+
+	const assets: AssetData[] = [];
+	const lines: string[] = [
+		'> ⚠️ This PDF has no text layer (scanned image). Pages are rendered as images below.',
+		'',
+	];
+
+	const SCALE = 1.5; // ~150 DPI equivalent for A4
+
+	for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+		const page = await pdf.getPage(pageNum);
+		const viewport = page.getViewport({ scale: SCALE });
+
+		const canvas = document.createElement('canvas');
+		canvas.width = Math.floor(viewport.width);
+		canvas.height = Math.floor(viewport.height);
+		const ctx = canvas.getContext('2d');
+
+		if (!ctx) {
+			canvas.width = 0;
+			canvas.height = 0;
+			continue;
+		}
+
+		await page.render({ canvasContext: ctx, viewport }).promise;
+
+		const blob = await canvasToBlob(canvas, 'image/jpeg', 0.85);
+		const data = await blob.arrayBuffer();
+		const filename = `page-${String(pageNum).padStart(3, '0')}.jpg`;
+
+		assets.push({ filename, data, mimeType: 'image/jpeg' });
+		lines.push(useWikilinks ? `![[${filename}]]` : `![Page ${pageNum}](${filename})`);
+
+		// Release canvas memory immediately
+		canvas.width = 0;
+		canvas.height = 0;
+	}
+
+	return {
+		markdown: lines.join('\n'),
+		warnings,
+		stats: { headings: 0, images: assets.length, tables: 0 },
+		assets,
+		frontmatterExtra: { pdf_has_text_layer: false },
+	};
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob> {
+	return new Promise((resolve, reject) =>
+		canvas.toBlob(
+			blob => (blob ? resolve(blob) : reject(new Error('canvas.toBlob returned null'))),
+			type,
+			quality,
+		),
+	);
+}
+
+// ── Text PDF helpers ──────────────────────────────────────────────────────────
 
 function groupIntoLines(items: TextItem[]): Line[] {
 	if (items.length === 0) return [];
@@ -130,18 +197,6 @@ function linesToMarkdown(lines: Line[]): string {
 	}
 
 	return parts.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-}
-
-function buildScannedStub(warnings: ConversionWarning[]): ConverterOutput {
-	warnings.push({ message: 'PDF has no text layer (scanned image). Text extraction was not possible.' });
-	const markdown = '> ⚠️ This PDF has no text layer (scanned image). Text extraction was not possible.\n> Original file is referenced in the frontmatter above.';
-	return {
-		markdown,
-		warnings,
-		stats: { headings: 0, images: 0, tables: 0 },
-		assets: [],
-		frontmatterExtra: { pdf_has_text_layer: false },
-	};
 }
 
 function countStats(md: string): { headings: number; images: number; tables: number } {
