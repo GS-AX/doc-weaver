@@ -1,5 +1,5 @@
 {
-  "name": "doc-weaver",
+  "name": "document-weaver",
   "version": "1.0.0",
   "description": "Convert local documents (Word, PDF, PowerPoint, HWP, Excel) to Markdown for Obsidian",
   "main": "main.js",
