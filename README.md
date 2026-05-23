@@ -1,4 +1,4 @@
-# Doc Weaver
+# Document Weaver
 
 > **[한국어 README](README.ko.md)**
 

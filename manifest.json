@@ -1,9 +1,9 @@
 {
 	"id": "document-weaver",
 	"name": "Document Weaver",
-	"version": "1.0.2",
+	"version": "1.0.3",
 	"minAppVersion": "1.4.0",
-	"description": "Convert local documents (Word, PDF, PowerPoint, HWP, Excel) to Markdown and save into your Obsidian vault.",
+	"description": "Convert local documents (Word, PDF, PowerPoint, HWP, Excel) to Markdown and save into your vault.",
 	"author": "GS-AX",
 	"authorUrl": "https://github.com/GS-AX",
 	"fundingUrl": "https://github.com/GS-AX",
