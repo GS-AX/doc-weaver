@@ -54,14 +54,15 @@ The local-file companion to [Confluence Weaver](https://github.com/GS-AX/conflue
 
 ## Installation
 
-### BRAT (recommended)
-1. Install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin
-2. BRAT settings → **Add Beta Plugin** → enter `GS-AX/doc-weaver`
+### Community Plugins (recommended)
+1. Obsidian → **Settings → Community Plugins → Browse**
+2. Search for **Document Weaver** and click **Install**
+3. Click **Enable**
 
 ### Manual
 1. Download `main.js` and `manifest.json` from [Releases](https://github.com/GS-AX/doc-weaver/releases)
-2. Copy both files to `.obsidian/plugins/doc-weaver/` inside your Vault
-3. Obsidian → Settings → Community Plugins → enable **Doc Weaver**
+2. Copy both files to `.obsidian/plugins/document-weaver/` inside your Vault
+3. Obsidian → **Settings → Community Plugins** → enable **Document Weaver**
 
 ---
 

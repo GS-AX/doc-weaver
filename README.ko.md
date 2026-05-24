@@ -54,14 +54,15 @@ API 키 없음. 클라우드 없음. 완전 오프라인.
 
 ## 설치
 
-### BRAT (권장)
-1. [BRAT](https://github.com/TfTHacker/obsidian42-brat) 플러그인 설치
-2. BRAT 설정 → **Add Beta Plugin** → `GS-AX/doc-weaver` 입력
+### 커뮤니티 플러그인 (권장)
+1. Obsidian → **설정 → 커뮤니티 플러그인 → 탐색**
+2. **Document Weaver** 검색 후 **설치** 클릭
+3. **활성화** 클릭
 
 ### 수동 설치
 1. [Releases](https://github.com/GS-AX/doc-weaver/releases)에서 `main.js`, `manifest.json` 다운로드
-2. Vault의 `.obsidian/plugins/doc-weaver/` 폴더에 복사
-3. Obsidian → 설정 → 커뮤니티 플러그인 → Doc Weaver 활성화
+2. Vault의 `.obsidian/plugins/document-weaver/` 폴더에 복사
+3. Obsidian → **설정 → 커뮤니티 플러그인** → **Document Weaver** 활성화
 
 ---
 
