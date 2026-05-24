@@ -42,13 +42,13 @@ The local-file companion to [Confluence Weaver](https://github.com/GS-AX/conflue
 
 | Format | Extension | Fidelity |
 |---|---|---|
-| Word | `.docx` | ★★★★ — headings, bold/italic, tables, images |
-| PowerPoint | `.pptx` | ★★★☆ — slide titles, bullets, notes, images |
-| PDF | `.pdf` | ★★★☆ — text layer only; scanned PDFs generate a stub note |
-| Excel | `.xlsx` / `.xls` | ★★★☆ — each sheet becomes a GFM table |
-| HWP | `.hwp` | ★★☆☆ ⚠ beta — binary format, best-effort |
-| HWPx | `.hwpx` | ★★★☆ ⚠ beta — ZIP+XML, better than HWP5 binary |
-| Plain text | `.txt` / `.csv` | ★★★★ — verbatim / GFM table |
+| Word | `.docx` | ★★★★ — headings, bold/italic, tables, images, embedded charts → markdown table. `.doc` not supported. |
+| PowerPoint | `.pptx` | ★★★☆ — slide titles, bullets, speaker notes, images. Animations and transitions not preserved. |
+| PDF | `.pdf` | ★★★☆ — text layer + heading detection. Charts extracted as images. Scanned PDFs rendered as page images. Tables as plain text only. |
+| Excel | `.xlsx` / `.xls` | ★★☆☆ — each sheet as GFM table. Chart extraction not supported. |
+| HWP | `.hwp` | ★★☆☆ ⚠ beta — binary format, best-effort. Merged cells and complex formatting may be lost. |
+| HWPx | `.hwpx` | ★★★☆ ⚠ beta — ZIP+XML, better fidelity than HWP. Inline image placement depends on XML structure. |
+| Plain text / CSV | `.txt` / `.csv` | ★★★★ — verbatim or auto-formatted as GFM table. |
 
 ---
 
