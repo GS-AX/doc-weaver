@@ -130,7 +130,7 @@ export class Importer {
 					throw new Error('Enable "Show HWP beta features" in settings to import HWP/HWPx files.');
 				}
 				return ext === 'hwp'
-					? convertHwp(buffer)
+					? convertHwp(buffer, this.settings.useWikilinks)
 					: convertHwpx(buffer, this.settings.useWikilinks);
 			}
 			case 'xlsx':

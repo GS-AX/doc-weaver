@@ -81,7 +81,7 @@ function styleNameToHeadingLevel(name: string): number {
 
 // ── HWP binary (.hwp) ─────────────────────────────────────────────────────────
 
-export async function convertHwp(buffer: ArrayBuffer): Promise<ConverterOutput> {
+export async function convertHwp(buffer: ArrayBuffer, useWikilinks = true): Promise<ConverterOutput> {
 	const warnings: ConversionWarning[] = [
 		{ message: 'HWP binary conversion is best-effort. Formatting may be lost.', isBeta: true },
 	];
@@ -147,6 +147,7 @@ export async function convertHwp(buffer: ArrayBuffer): Promise<ConverterOutput> 
 		if (bin.data?.length) {
 			const filename = `image-${String(++imgIdx).padStart(3, '0')}.${bin.extension || 'png'}`;
 			assets.push({ filename, data: bin.data.buffer as ArrayBuffer, mimeType: extToMime(bin.extension) });
+			lines.push(useWikilinks ? `![[${filename}]]` : `![](${filename})`);
 		}
 	}
 
@@ -210,14 +211,6 @@ function byLocalName(node: Document | Element, ...names: string[]): Element[] {
 	return Array.from(root.getElementsByTagName('*')).filter(el => upper.has(el.localName.toUpperCase()));
 }
 
-function isInsideCell(el: Element): boolean {
-	let cur = el.parentElement;
-	while (cur) {
-		if (['CELL', 'TD'].includes(cur.localName.toUpperCase())) return true;
-		cur = cur.parentElement;
-	}
-	return false;
-}
 
 export async function convertHwpx(buffer: ArrayBuffer, useWikilinks: boolean): Promise<ConverterOutput> {
 	const warnings: ConversionWarning[] = [
@@ -241,19 +234,12 @@ export async function convertHwpx(buffer: ArrayBuffer, useWikilinks: boolean): P
 		return { markdown: '', warnings, stats: { headings: 0, images: 0, tables: 0 }, assets };
 	}
 
-	for (const sectionPath of sectionPaths) {
-		const xml = zipText(zip, sectionPath);
-		if (!xml) continue;
-		const doc = new DOMParser().parseFromString(xml, 'text/xml');
-		const { md, h, t } = parseHwpxSection(doc, styleMap, useWikilinks);
-		if (md) lines.push(md);
-		headingCount += h;
-		tableCount += t;
-	}
-
-	// Images: HWPx stores them in BinData/ at the root or inside Contents/
+	// Build binData map and ordered ref list before walking sections.
+	// HWPx stores images in BinData/BIN00001.PNG etc.; section XML references them by numeric ID.
 	let imgIdx = 0;
-	const binPaths = Object.keys(zip).filter(p => /bindata\//i.test(p) && !p.endsWith('/'));
+	const binDataMap = new Map<number, string>(); // numericId → image markdown ref
+	const orderedRefs: string[] = [];             // refs in extraction order (for sequential fallback)
+	const binPaths = Object.keys(zip).filter(p => /bindata\//i.test(p) && !p.endsWith('/')).sort();
 	for (const binPath of binPaths) {
 		const data = zipBinary(zip, binPath);
 		if (!data) continue;
@@ -261,6 +247,29 @@ export async function convertHwpx(buffer: ArrayBuffer, useWikilinks: boolean): P
 		if (!['png', 'jpg', 'jpeg', 'gif', 'bmp', 'wmf', 'emf'].includes(ext)) continue;
 		const filename = `image-${String(++imgIdx).padStart(3, '0')}.${ext}`;
 		assets.push({ filename, data, mimeType: extToMime(ext) });
+		const ref = useWikilinks ? `![[${filename}]]` : `![](${filename})`;
+		orderedRefs.push(ref);
+		const m = binPath.match(/(\d+)\.[^/.]+$/);
+		if (m) binDataMap.set(parseInt(m[1]), ref);
+		binDataMap.set(imgIdx, ref);
+	}
+
+	const placedIds = new Set<number>();
+	const imageCursor = { i: 0 }; // shared sequential fallback cursor across all sections
+
+	for (const sectionPath of sectionPaths) {
+		const xml = zipText(zip, sectionPath);
+		if (!xml) continue;
+		const doc = new DOMParser().parseFromString(xml, 'text/xml');
+		const { md, h, t } = parseHwpxSection(doc, styleMap, binDataMap, placedIds, orderedRefs, imageCursor);
+		if (md) lines.push(md);
+		headingCount += h;
+		tableCount += t;
+	}
+
+	// Append any images not placed inline (sequential fallback exhausted all inline placements)
+	for (let i = imageCursor.i; i < orderedRefs.length; i++) {
+		lines.push(orderedRefs[i]);
 	}
 
 	const markdown = lines.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
@@ -301,51 +310,105 @@ function buildHwpxStyleMap(zip: ZipFiles): Map<string, number> {
 	return map;
 }
 
+// HWPx element localNames that indicate an image/drawing container.
+// When attribute-based ID detection fails, these trigger sequential fallback placement.
+const HWPX_IMAGE_ELEMENT_NAMES = new Set([
+	'PICTURE', 'PICTURECTRL', 'GSHAPEOBJECT', 'GSHAPE', 'DRAWINGOBJECT',
+	'DRAWOBJ', 'IMG', 'IMAGE', 'IMAGEDATA', 'PICOBJ', 'SHAPECOMPONENT',
+]);
+
 function parseHwpxSection(
 	doc: Document,
 	styleMap: Map<string, number>,
-	_useWikilinks: boolean,
+	binDataMap: Map<number, string>,
+	placedIds: Set<number>,
+	orderedRefs: string[],
+	imageCursor: { i: number },
 ): { md: string; h: number; t: number } {
 	const lines: string[] = [];
 	let h = 0;
 	let t = 0;
 
-	// Paragraphs — use localName matching to handle namespace prefixes (e.g. hh:P)
-	const paras = byLocalName(doc, 'P', 'PARA');
+	function walk(el: Element) {
+		const name = el.localName.toUpperCase();
 
-	for (const para of paras) {
-		// Skip paragraphs that are inside table cells (handled by table parser)
-		if (isInsideCell(para)) continue;
+		// Tables: convert as a unit, do not recurse into children
+		if (['TABLE', 'TBL'].includes(name)) {
+			const mdTable = hwpxTableToMd(el);
+			if (mdTable) { lines.push(mdTable); t++; }
+			return;
+		}
 
-		const styleId =
-			para.getAttribute('StyleId') ??
-			para.getAttribute('StyleID') ??
-			para.getAttribute('styleId') ??
-			'';
-		const headingLevel = styleMap.get(styleId) ?? 0;
+		// Attribute-based image detection (any element, any attribute naming convention)
+		const binId = getHwpxBinId(el);
+		if (binId !== null) {
+			const ref = binDataMap.get(binId);
+			if (ref && !placedIds.has(binId)) {
+				lines.push(ref);
+				placedIds.add(binId);
+			}
+			return; // image element — do not recurse further
+		}
 
-		const text = extractHwpxText(para).trim();
-		if (!text) continue;
+		// Sequential fallback: element localName strongly suggests an image container
+		// but no recognisable ID attribute was found — take the next unplaced image in order
+		if (HWPX_IMAGE_ELEMENT_NAMES.has(name)) {
+			if (imageCursor.i < orderedRefs.length) {
+				lines.push(orderedRefs[imageCursor.i++]);
+			}
+			return;
+		}
 
-		if (headingLevel > 0) {
-			lines.push(`${'#'.repeat(headingLevel)} ${text}`);
-			h++;
-		} else {
-			lines.push(text);
+		// Paragraph: extract text, then fall through to recurse so inline image
+		// controls inside the paragraph are also visited
+		if (['P', 'PARA'].includes(name)) {
+			const styleId =
+				el.getAttribute('StyleId') ??
+				el.getAttribute('StyleID') ??
+				el.getAttribute('styleId') ??
+				'';
+			const headingLevel = styleMap.get(styleId) ?? 0;
+			const text = extractHwpxText(el).trim();
+			if (headingLevel > 0) {
+				if (text) { lines.push(`${'#'.repeat(headingLevel)} ${text}`); h++; }
+			} else {
+				if (text) lines.push(text);
+			}
+			// fall through — recurse into children to find inline image controls
+		}
+
+		// Recurse into children for all non-table, non-image elements (including P)
+		for (const child of Array.from(el.children)) {
+			walk(child);
 		}
 	}
 
-	// Tables
-	const tables = byLocalName(doc, 'TABLE', 'TBL');
-	for (const tbl of tables) {
-		const mdTable = hwpxTableToMd(tbl);
-		if (mdTable) {
-			lines.push(mdTable);
-			t++;
-		}
+	for (const child of Array.from(doc.documentElement.children)) {
+		walk(child);
 	}
 
 	return { md: lines.join('\n\n'), h, t };
+}
+
+/** Detect a BinData numeric ID from any attribute on an element.
+ *  Checks named ID attributes first, then scans all attributes for a
+ *  BinData path like "BinData/BIN00001.png" (actual HWPx href pattern). */
+function getHwpxBinId(el: Element): number | null {
+	const idAttrs = [
+		'BinItemIDRef', 'binItemIDRef', 'BinItemID', 'binItemID',
+		'BinDataID', 'binDataID', 'BinDataIDRef', 'binDataIDRef',
+		'idRef', 'itemIDRef',
+	];
+	for (const attr of idAttrs) {
+		const val = el.getAttribute(attr);
+		if (val && /^\d+$/.test(val.trim())) return parseInt(val.trim());
+	}
+	// Scan every attribute for a BinData path reference, e.g. href="BinData/BIN00001.png"
+	for (const attr of Array.from(el.attributes)) {
+		const m = attr.value.match(/BIN0*(\d+)\.[a-zA-Z]{2,5}/i);
+		if (m) return parseInt(m[1]);
+	}
+	return null;
 }
 
 function extractHwpxText(el: Element): string {
@@ -361,7 +424,7 @@ function extractHwpxText(el: Element): string {
 function hwpxTableToMd(tbl: Element): string {
 	const rows = byLocalName(tbl, 'ROW', 'TR');
 	const data = rows.map(row =>
-		byLocalName(row, 'CELL', 'TD').map(cell =>
+		byLocalName(row, 'CELL', 'TD', 'TC').map(cell =>
 			extractHwpxText(cell).replace(/\|/g, '\\|').trim(),
 		),
 	);

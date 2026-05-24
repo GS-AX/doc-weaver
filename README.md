@@ -18,6 +18,26 @@ The local-file companion to [Confluence Weaver](https://github.com/GS-AX/conflue
 
 ---
 
+## Screenshots
+
+### Menu
+![Menu](docs/menu.PNG)
+
+### Conversion Examples
+
+| DOCX | PDF |
+|---|---|
+| ![DOCX](docs/docx.PNG) | ![PDF](docs/pdf.PNG) |
+
+| PPTX | XLSX |
+|---|---|
+| ![PPTX](docs/ppt.PNG) | ![XLSX](docs/xlsx.PNG) |
+
+### HWPx
+![HWPx](docs/hwpx.PNG)
+
+---
+
 ## Supported Formats
 
 | Format | Extension | Fidelity |

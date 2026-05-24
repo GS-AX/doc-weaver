@@ -1,4 +1,6 @@
+import { unzipSync } from 'fflate';
 import { ConverterOutput, ConversionWarning } from '../types';
+import { parseChartXml } from './chartParser';
 
 // SheetJS — supports .xlsx and .xls
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -36,14 +38,39 @@ export async function convertXlsx(
 		sections.push(markdown);
 	}
 
-	const markdown = sections.join('\n\n').trim();
+	// Extract charts from XLSX ZIP (xl/charts/*.xml); .xls has no chart XML to parse
+	const chartMd = extractXlsxCharts(buffer);
+
+	let markdown = sections.join('\n\n').trim();
+	if (chartMd.length > 0) {
+		markdown = (markdown ? `${markdown}\n\n` : '') + `## Charts\n\n${chartMd.join('\n\n')}`;
+	}
 
 	return {
 		markdown,
 		warnings,
-		stats: { headings: workbook.SheetNames.length, images: 0, tables: totalTables },
+		stats: {
+			headings: workbook.SheetNames.length,
+			images: 0,
+			tables: totalTables + chartMd.length,
+		},
 		assets: [],
 	};
+}
+
+function extractXlsxCharts(buffer: ArrayBuffer): string[] {
+	try {
+		const zip = unzipSync(new Uint8Array(buffer));
+		const dec = new TextDecoder('utf-8');
+		return Object.keys(zip)
+			.filter(p => /^xl\/charts\/[^/]+\.xml$/i.test(p))
+			.sort()
+			.map(p => parseChartXml(dec.decode(zip[p])))
+			.filter((md): md is string => md !== null);
+	} catch {
+		// .xls files are not ZIP-based — silently skip
+		return [];
+	}
 }
 
 function getCellText(sheet: import('xlsx').WorkSheet, r: number, c: number): string {
