@@ -73,7 +73,7 @@ The local-file companion to [Confluence Weaver](https://github.com/GS-AX/conflue
 | Method | How |
 |---|---|
 | **Command palette** | `Doc Weaver: Import file…` → system file picker (multi-select supported) |
-| **Drag & drop** | Drop one or more supported files onto the Obsidian window |
+| **Drag & drop** | Drop supported files anywhere onto the Obsidian window — editor, file explorer, anywhere. Document Weaver intercepts the drop and converts automatically. Unsupported files (images, `.md`, etc.) pass through to Obsidian as normal. |
 | **Watch folder** | Configure inbox folders in settings; new files are converted automatically |
 
 ### Output
