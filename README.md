@@ -1,6 +1,6 @@
 # Document Weaver
 
-> **[한국어 README](README.ko.md)**
+> **[한국어 README](https://github.com/GS-AX/doc-weaver/blob/master/README.ko.md)**
 
 **Stop copy-pasting. Drop files, get notes.**
 

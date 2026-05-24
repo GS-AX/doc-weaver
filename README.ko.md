@@ -1,6 +1,6 @@
 # Document Weaver
 
-> **[English README](README.md)**
+> **[English README](https://github.com/GS-AX/doc-weaver/blob/master/README.md)**
 
 **복붙은 그만. 파일을 드롭하면 노트가 됩니다.**
 
