@@ -8,6 +8,10 @@ import { AssetData, ConverterOutput, ConversionWarning } from '../types';
 // the real Worker thread and the GlobalWorkerOptions.workerSrc requirement entirely.
 (globalThis as any).pdfjsWorker = { WorkerMessageHandler };
 
+// pdfjs rendering operator IDs for embedded images (stable across pdfjs v4.x)
+// 83 = paintInlineImageXObject, 85 = paintImageXObject, 88 = paintImageXObjectRepeat
+const IMAGE_OPS = new Set([83, 85, 88]);
+
 interface Line {
 	y: number;
 	fontSize: number;
@@ -22,16 +26,26 @@ export async function convertPdf(buffer: ArrayBuffer, useWikilinks = true): Prom
 
 	const allLines: Line[] = [];
 	let hasTextLayer = false;
+	const pagesWithImages: number[] = [];
 
 	for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
 		const page = await pdf.getPage(pageNum);
-		const content = await page.getTextContent();
+
+		// Run text extraction and operator list scan in parallel
+		const [content, ops] = await Promise.all([
+			page.getTextContent(),
+			page.getOperatorList() as Promise<{ fnArray: number[]; argsArray: unknown[][] }>,
+		]);
 
 		const items = content.items.filter((item): item is TextItem => 'str' in item && item.str.trim() !== '');
 		if (items.length > 0) hasTextLayer = true;
 
 		const lines = groupIntoLines(items);
 		allLines.push(...lines);
+
+		if (ops.fnArray.some(fn => IMAGE_OPS.has(fn))) {
+			pagesWithImages.push(pageNum);
+		}
 
 		if (pageNum < pdf.numPages && lines.length > 0) {
 			allLines.push({ y: -1, fontSize: 0, text: '---PAGE_BREAK---' });
@@ -42,13 +56,64 @@ export async function convertPdf(buffer: ArrayBuffer, useWikilinks = true): Prom
 		return renderScannedPages(pdf, warnings, useWikilinks);
 	}
 
-	const markdown = linesToMarkdown(allLines);
+	// Render pages that contain embedded images as visual supplements
+	const assets: AssetData[] = [];
+	for (const pageNum of pagesWithImages) {
+		const page = await pdf.getPage(pageNum);
+		const asset = await renderPageToJpeg(page, pageNum);
+		if (asset) assets.push(asset);
+	}
+
+	let markdown = linesToMarkdown(allLines);
+
+	if (assets.length > 0) {
+		markdown += '\n\n---\n\n';
+		for (const asset of assets) {
+			markdown += '\n' + (useWikilinks ? `![[${asset.filename}]]` : `![](${asset.filename})`);
+		}
+		warnings.push({
+			message: `${assets.length} page(s) contain embedded images and are rendered as visual supplements below the text.`,
+		});
+	}
 
 	return {
 		markdown,
 		warnings,
 		stats: countStats(markdown),
-		assets: [],
+		assets,
+	};
+}
+
+// ── Render a single PDF page to JPEG ─────────────────────────────────────────
+
+async function renderPageToJpeg(page: any, pageNum: number): Promise<AssetData | null> {
+	const SCALE = 1.5; // ~150 DPI equivalent for A4
+	const viewport = page.getViewport({ scale: SCALE });
+
+	const canvas = document.createElement('canvas');
+	canvas.width = Math.floor(viewport.width);
+	canvas.height = Math.floor(viewport.height);
+	const ctx = canvas.getContext('2d');
+
+	if (!ctx) {
+		canvas.width = 0;
+		canvas.height = 0;
+		return null;
+	}
+
+	await page.render({ canvasContext: ctx, viewport }).promise;
+
+	const blob = await canvasToBlob(canvas, 'image/jpeg', 0.85);
+	const data = await blob.arrayBuffer();
+
+	// Release canvas memory immediately
+	canvas.width = 0;
+	canvas.height = 0;
+
+	return {
+		filename: `page-${String(pageNum).padStart(3, '0')}.jpg`,
+		data,
+		mimeType: 'image/jpeg',
 	};
 }
 
@@ -67,35 +132,13 @@ async function renderScannedPages(
 		'',
 	];
 
-	const SCALE = 1.5; // ~150 DPI equivalent for A4
-
 	for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
 		const page = await pdf.getPage(pageNum);
-		const viewport = page.getViewport({ scale: SCALE });
+		const asset = await renderPageToJpeg(page, pageNum);
+		if (!asset) continue;
 
-		const canvas = document.createElement('canvas');
-		canvas.width = Math.floor(viewport.width);
-		canvas.height = Math.floor(viewport.height);
-		const ctx = canvas.getContext('2d');
-
-		if (!ctx) {
-			canvas.width = 0;
-			canvas.height = 0;
-			continue;
-		}
-
-		await page.render({ canvasContext: ctx, viewport }).promise;
-
-		const blob = await canvasToBlob(canvas, 'image/jpeg', 0.85);
-		const data = await blob.arrayBuffer();
-		const filename = `page-${String(pageNum).padStart(3, '0')}.jpg`;
-
-		assets.push({ filename, data, mimeType: 'image/jpeg' });
-		lines.push(useWikilinks ? `![[${filename}]]` : `![Page ${pageNum}](${filename})`);
-
-		// Release canvas memory immediately
-		canvas.width = 0;
-		canvas.height = 0;
+		assets.push(asset);
+		lines.push(useWikilinks ? `![[${asset.filename}]]` : `![Page ${pageNum}](${asset.filename})`);
 	}
 
 	return {
