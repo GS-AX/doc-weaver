@@ -146,7 +146,8 @@ export async function convertHwp(buffer: ArrayBuffer, useWikilinks = true): Prom
 	for (const bin of doc.info.binData) {
 		if (bin.data?.length) {
 			const filename = `image-${String(++imgIdx).padStart(3, '0')}.${bin.extension || 'png'}`;
-			assets.push({ filename, data: bin.data.buffer as ArrayBuffer, mimeType: extToMime(bin.extension) });
+			const data = bin.data.buffer.slice(bin.data.byteOffset, bin.data.byteOffset + bin.data.byteLength) as ArrayBuffer;
+			assets.push({ filename, data, mimeType: extToMime(bin.extension) });
 			lines.push(useWikilinks ? `![[${filename}]]` : `![](${filename})`);
 		}
 	}
