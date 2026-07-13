@@ -301,7 +301,7 @@ export async function convertPdf(buffer: ArrayBuffer, useWikilinks = true): Prom
 
 		const pageLines: Line[] = groupIntoLines(items);
 
-		const SCALE = 1.0;
+		const SCALE = 2.0;
 		const viewport = page.getViewport({ scale: SCALE });
 		const cw = Math.floor(viewport.width);
 		const ch = Math.floor(viewport.height);
@@ -387,7 +387,7 @@ async function renderScannedPages(
 		'',
 	];
 
-	const SCALE = 1.0;
+	const SCALE = 2.0;
 
 	for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
 		const page = await pdf.getPage(pageNum);
@@ -433,6 +433,6 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number):
 function countStats(md: string): { headings: number; images: number; tables: number } {
 	const headings = (md.match(/^#{1,6} /gm) ?? []).length;
 	const images = (md.match(/!\[/g) ?? []).length;
-	const tables = (md.match(/^\|/gm) ?? []).length > 0 ? 1 : 0;
+	const tables = (md.match(/^\|\s*:?-+:?\s*\|/gm) ?? []).length;
 	return { headings, images, tables };
 }
