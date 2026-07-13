@@ -13,7 +13,7 @@ export async function convertPlain(buffer: ArrayBuffer, ext: string): Promise<Co
 	return {
 		markdown,
 		warnings: [],
-		stats: { headings: 0, images: 0, tables: 0 },
+		stats: { headings: 0, images: 0, tables: ext === 'csv' ? 1 : 0 },
 		assets: [],
 	};
 }
@@ -22,7 +22,7 @@ function convertCsv(csv: string): string {
 	const lines = csv.trim().split(/\r?\n/);
 	if (lines.length === 0) return '';
 
-	const rows = lines.map(line => parseCsvLine(line));
+	const rows = lines.map(line => parseCsvLine(line).map(cell => cell.replace(/\|/g, '\\|')));
 	const colCount = Math.max(...rows.map(r => r.length));
 	const pad = (row: string[]) => {
 		while (row.length < colCount) row.push('');
