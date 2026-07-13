@@ -87,7 +87,7 @@ function nodeToMd(node: Node, listDepth: number, stats: ConversionStats, wikilin
 			if (el.parentElement?.tagName.toLowerCase() === 'pre') {
 				return el.textContent ?? '';
 			}
-			return `\`${el.textContent}\``;
+			return `\`${el.textContent ?? ''}\``;
 		}
 
 		case 'pre': {
@@ -168,7 +168,19 @@ function convertTable(
 	stats: ConversionStats,
 	wikilinks: boolean,
 ): string {
-	const rows = Array.from(el.querySelectorAll('tr'));
+	const rows: Element[] = [];
+	for (const child of Array.from(el.children)) {
+		const childTag = child.tagName.toLowerCase();
+		if (childTag === 'tr') {
+			rows.push(child);
+		} else if (['thead', 'tbody', 'tfoot'].includes(childTag)) {
+			for (const grandchild of Array.from(child.children)) {
+				if (grandchild.tagName.toLowerCase() === 'tr') {
+					rows.push(grandchild);
+				}
+			}
+		}
+	}
 	if (rows.length === 0) return '';
 	stats.tables++;
 
@@ -179,7 +191,8 @@ function convertTable(
 
 	for (let ri = 0; ri < rows.length; ri++) {
 		let ci = 0;
-		for (const cell of Array.from(rows[ri].querySelectorAll('th, td'))) {
+		const cells = Array.from(rows[ri].children).filter(c => ['th', 'td'].includes(c.tagName.toLowerCase()));
+		for (const cell of cells) {
 			// Advance past columns already filled by a rowspan from a previous row
 			while (occupied.has(`${ri},${ci}`)) ci++;
 
